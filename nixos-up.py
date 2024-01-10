@@ -56,6 +56,22 @@ def ask_disk() -> int:
 selected_disk = ask_disk()
 print()
 
+def ask_root_part_size() -> int:
+  sel = input(f"What size for the root partition (in GB)? ")
+  try:
+    size = int(sel)
+    if size < 10:
+      print(f"Input must be >= 10.\n")
+      return ask_root_part_size()
+    else:
+      return size
+  except ValueError:
+    print(f"Input must be an integer.\n")
+    return ask_root_part_size()
+
+root_part_size = ask_root_part_size()
+print()
+
 def ask_graphical() -> bool:
   sel = input("""Will this be a desktop/graphical install? Ie, do you have a
     monitor (y) or is this a server (n)? [Yn] """).lower()
@@ -132,11 +148,14 @@ if efi:
   # Set the partition as bootable
   run(["parted", f"/dev/{selected_disk_name}", "--", "set", "1", "esp", "on"])
   # Create root partition after the boot partition.
-  run(["parted", f"/dev/{selected_disk_name}", "--", "mkpart", "primary", "512MiB", "100%"])
+  run(["parted", f"/dev/{selected_disk_name}", "--", "mkpart", "primary", "512MiB", f"{root_part_size * 1024 + 512}MiB"])
+  # Create home partition after the root partition.
+  run(["parted", f"/dev/{selected_disk_name}", "--", "mkpart", "primary", f"{root_part_size * 1024 + 512}MiB", "100%"])
 else:
   print("Did not detect an EFI/UEFI boot. Proceeding with a legacy MBR partitioning scheme...")
   run(["parted", f"/dev/{selected_disk_name}", "--", "mklabel", "msdos"])
-  run(["parted", f"/dev/{selected_disk_name}", "--", "mkpart", "primary", "1MiB", "100%"])
+  run(["parted", f"/dev/{selected_disk_name}", "--", "mkpart", "primary", "1MiB", f"{root_part_size * 1024 + 1}MiB"])
+  run(["parted", f"/dev/{selected_disk_name}", "--", "mkpart", "primary", f"{root_part_size * 1024 + 1}MiB", "100%"])
 
 ### Formatting
 # Different linux device drivers have different partition naming conventions.
@@ -164,9 +183,11 @@ if efi:
   # This occasionally fails with "unable to open /dev/"
   run(["mkfs.fat", "-F", "32", "-n", "boot", f"/dev/{partition_name(selected_disk_name, 1)}"])
   run(["mkfs.ext4", "-L", "nixos", f"/dev/{partition_name(selected_disk_name, 2)}"])
+  run(["mkfs.ext4", "-L", "home", f"/dev/{partition_name(selected_disk_name, 3)}"])
 else:
   # MBR: The first partition is the root partition and there's no boot partition.
   run(["mkfs.ext4", "-L", "nixos", f"/dev/{partition_name(selected_disk_name, 1)}"])
+  run(["mkfs.ext4", "-L", "home", f"/dev/{partition_name(selected_disk_name, 2)}"])
 
 ### Mounting
 # Sometimes when switching between BIOS/UEFI, we need to force the kernel to
@@ -190,6 +211,8 @@ refresh_block_index()
 
 # This occasionally fails with "/dev/disk/by-label/nixos does not exist".
 run(["mount", "/dev/disk/by-label/nixos", "/mnt"])
+run(["mkdir", "-p", "/mnt/home"])
+run(["mount", "/dev/disk/by-label/home", "/mnt/home"])
 if efi:
   run(["mkdir", "-p", "/mnt/boot"])
   run(["mount", "/dev/disk/by-label/boot", "/mnt/boot"])
